@@ -5,6 +5,11 @@ Vagrant.configure("2") do |config|
   WORKER1_IP = "192.168.56.11"
   WORKER2_IP = "192.168.56.12"
   RANCHER_HOSTNAME = "rancher.local"
+  TRAEFIK_CONFIG_DIR = "traefik-config"
+  TRAEFIK_CONFIG_DIR = "/vagrant/traefik-config"
+
+  # 確保 traefik-config 目錄在 VM 內部可用
+  config.vm.synced_folder "traefik-config", "/vagrant/traefik-config"
 
   # ---------------------------
   # K3s Master 節點
@@ -12,8 +17,8 @@ Vagrant.configure("2") do |config|
   config.vm.define "k3s-master" do |master|
     master.vm.hostname = "k3s-master"
     master.vm.network "private_network", ip: MASTER_IP
-    master.vm.network "forwarded_port", guest: 443, host: 8443
-    master.vm.network "forwarded_port", guest: 6443, host: 6443
+    master.vm.network "forwarded_port", guest: 6443, host: 6443  # K3s API Server
+    master.vm.network "forwarded_port", guest: 32080, host: 8080 # Traefik HTTP 入口
 
     master.vm.provider "virtualbox" do |vb|
       vb.memory = 8192
@@ -21,7 +26,7 @@ Vagrant.configure("2") do |config|
     end
 
     master.vm.provision "shell", inline: <<-SHELL
-      echo "[INFO] 安裝 K3s Master 並啟用 Helm、Cert-Manager 和 Rancher"
+      echo "[INFO] 安裝 K3s Master 並啟用 Helm、Traefik 和 Rancher"
 
       # 安裝 K3s 並指定 Master 的 node-ip
       curl -sfL https://get.k3s.io | sh -s - --write-kubeconfig-mode=644 --node-ip=#{MASTER_IP}
@@ -35,7 +40,7 @@ Vagrant.configure("2") do |config|
       # 設定 kubeconfig，確保 helm 安裝時可以使用
       export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 
-      # 設定 /etc/hosts，讓 rancher.local 指向 192.168.56.10
+      # 設定 /etc/hosts，確保 Rancher 可解析
       echo "192.168.56.10 #{RANCHER_HOSTNAME}" | sudo tee -a /etc/hosts
 
       # 等待 K3s 完全啟動
@@ -43,6 +48,9 @@ Vagrant.configure("2") do |config|
         echo "[INFO] 等待 K3s Master Ready..."
         sleep 5
       done
+
+      # 確保 kubectl 正常運作
+      kubectl get nodes
 
       # 取得 Worker 需要的 token
       sudo cat /var/lib/rancher/k3s/server/node-token > /vagrant/node-token
@@ -58,21 +66,23 @@ Vagrant.configure("2") do |config|
 
       # 新增 Helm Repository
       echo "[INFO] 設定 Helm Repo"
+      helm repo add traefik https://helm.traefik.io/traefik
       helm repo add rancher-stable https://releases.rancher.com/server-charts/stable
       helm repo add jetstack https://charts.jetstack.io
       helm repo update
 
-      # 安裝 Cert-Manager (CRDs)
-      echo "[INFO] 安裝 Cert-Manager"
-      kubectl create namespace cert-manager || true
-      helm install cert-manager jetstack/cert-manager \
-        --namespace cert-manager \
-        --set installCRDs=true --kubeconfig /etc/rancher/k3s/k3s.yaml
+      # 安裝 Traefik 並固定 NodePort
+      echo "[INFO] 安裝 Traefik"
+      helm install traefik traefik/traefik \
+        --namespace kube-system \
+        --set service.spec.type=NodePort \
+        --set service.spec.ports[0].nodePort=32080 \
+        --set additionalArguments="{--entryPoints.web.address=:32080}"
 
-      # 確保 Cert-Manager 啟動
-      echo "[INFO] 等待 Cert-Manager 完全啟動..."
-      until kubectl get pods -n cert-manager | grep 'Running' | wc -l | grep -q '3'; do
-        echo "[INFO] 等待 Cert-Manager CRDs 準備完成..."
+      # 確保 Traefik 成功部署
+      echo "[INFO] 等待 Traefik 部署..."
+      until kubectl get pods -n kube-system | grep traefik | grep 'Running' > /dev/null; do
+        echo "[INFO] 等待 Traefik Ready..."
         sleep 10
       done
 
@@ -84,9 +94,13 @@ Vagrant.configure("2") do |config|
         --set hostname=#{RANCHER_HOSTNAME} \
         --set replicas=1 \
         --set bootstrapPassword="admin" \
-        --kubeconfig /etc/rancher/k3s/k3s.yaml
+        --set tls=external \
+        --set ingress.enabled=false
 
-      echo "[INFO] Rancher 安裝完成，可在 https://#{RANCHER_HOSTNAME} 或 https://localhost:8443 訪問"
+      # 套用 Traefik 設定
+      kubectl apply -f #{TRAEFIK_CONFIG_DIR}/rancher.yaml
+
+      echo "[INFO] Rancher 安裝完成，可透過 http://#{MASTER_IP}:8080 訪問"
     SHELL
   end
 
