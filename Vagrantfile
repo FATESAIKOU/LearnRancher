@@ -4,6 +4,7 @@ Vagrant.configure("2") do |config|
   MASTER_IP = "192.168.56.10"
   WORKER1_IP = "192.168.56.11"
   WORKER2_IP = "192.168.56.12"
+  RANCHER_HOSTNAME = "rancher.local"
 
   # ---------------------------
   # K3s Master 節點
@@ -33,6 +34,9 @@ Vagrant.configure("2") do |config|
 
       # 設定 kubeconfig，確保 helm 安裝時可以使用
       export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+
+      # 設定 /etc/hosts，讓 rancher.local 指向 192.168.56.10
+      echo "192.168.56.10 #{RANCHER_HOSTNAME}" | sudo tee -a /etc/hosts
 
       # 等待 K3s 完全啟動
       until kubectl get nodes 2>/dev/null | grep -q 'Ready'; do
@@ -77,12 +81,12 @@ Vagrant.configure("2") do |config|
       kubectl create namespace cattle-system || true
       helm install rancher rancher-stable/rancher \
         --namespace cattle-system \
-        --set hostname=#{MASTER_IP} \
+        --set hostname=#{RANCHER_HOSTNAME} \
         --set replicas=1 \
         --set bootstrapPassword="admin" \
         --kubeconfig /etc/rancher/k3s/k3s.yaml
 
-      echo "[INFO] Rancher 安裝完成，可在 https://#{MASTER_IP} 或 https://localhost:8443 訪問"
+      echo "[INFO] Rancher 安裝完成，可在 https://#{RANCHER_HOSTNAME} 或 https://localhost:8443 訪問"
     SHELL
   end
 
