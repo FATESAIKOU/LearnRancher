@@ -20,7 +20,7 @@ Vagrant.configure("2") do |config|
     end
 
     master.vm.provision "shell", inline: <<-SHELL
-      echo "[INFO] 安裝 K3s Master 並啟用 Helm 和 Rancher"
+      echo "[INFO] 安裝 K3s Master 並啟用 Helm、Cert-Manager 和 Rancher"
 
       # 安裝 K3s 並指定 Master 的 node-ip
       curl -sfL https://get.k3s.io | sh -s - --write-kubeconfig-mode=644 --node-ip=#{MASTER_IP}
@@ -30,6 +30,9 @@ Vagrant.configure("2") do |config|
       echo "alias k='kubectl'" >> /home/vagrant/.bashrc
       sudo ln -s /usr/local/bin/kubectl /usr/bin/kubectl
       sudo chown vagrant:vagrant /etc/rancher/k3s/k3s.yaml
+
+      # 設定 kubeconfig，確保 helm 安裝時可以使用
+      export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 
       # 等待 K3s 完全啟動
       until kubectl get nodes 2>/dev/null | grep -q 'Ready'; do
@@ -46,11 +49,32 @@ Vagrant.configure("2") do |config|
       sudo apt-get install -y curl apt-transport-https gnupg lsb-release
       curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 
+      # 確保 Helm 版本正確
+      helm version
+
+      # 新增 Helm Repository
+      echo "[INFO] 設定 Helm Repo"
+      helm repo add rancher-stable https://releases.rancher.com/server-charts/stable
+      helm repo add jetstack https://charts.jetstack.io
+      helm repo update
+
+      # 安裝 Cert-Manager (CRDs)
+      echo "[INFO] 安裝 Cert-Manager"
+      kubectl create namespace cert-manager || true
+      helm install cert-manager jetstack/cert-manager \
+        --namespace cert-manager \
+        --set installCRDs=true --kubeconfig /etc/rancher/k3s/k3s.yaml
+
+      # 確保 Cert-Manager 啟動
+      echo "[INFO] 等待 Cert-Manager 完全啟動..."
+      until kubectl get pods -n cert-manager | grep 'Running' | wc -l | grep -q '3'; do
+        echo "[INFO] 等待 Cert-Manager CRDs 準備完成..."
+        sleep 10
+      done
+
       # 安裝 Rancher
       echo "[INFO] 安裝 Rancher"
-      kubectl create namespace cattle-system
-      helm repo add rancher-stable https://releases.rancher.com/server-charts/stable
-      helm repo update
+      kubectl create namespace cattle-system || true
       helm install rancher rancher-stable/rancher \
         --namespace cattle-system \
         --set hostname=#{MASTER_IP} \
