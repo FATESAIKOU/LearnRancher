@@ -1,2 +1,4 @@
 .vagrant
 node-token
+*.swp
+*.swo
