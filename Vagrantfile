@@ -5,7 +5,6 @@ Vagrant.configure("2") do |config|
   WORKER1_IP = "192.168.56.11"
   WORKER2_IP = "192.168.56.12"
   RANCHER_HOSTNAME = "rancher.local"
-  TRAEFIK_CONFIG_DIR = "traefik-config"
   TRAEFIK_CONFIG_DIR = "/vagrant/traefik-config"
 
   # 確保 traefik-config 目錄在 VM 內部可用
@@ -41,7 +40,7 @@ Vagrant.configure("2") do |config|
       export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 
       # 設定 /etc/hosts，確保 Rancher 可解析
-      echo "192.168.56.10 #{RANCHER_HOSTNAME}" | sudo tee -a /etc/hosts
+      echo "#{MASTER_IP} #{RANCHER_HOSTNAME}" | sudo tee -a /etc/hosts
 
       # 等待 K3s 完全啟動
       until kubectl get nodes 2>/dev/null | grep -q 'Ready'; do
@@ -71,13 +70,16 @@ Vagrant.configure("2") do |config|
       helm repo add jetstack https://charts.jetstack.io
       helm repo update
 
-      # 安裝 Traefik 並固定 NodePort
+      # 安裝 Traefik 並固定 Helm Chart 版本
       echo "[INFO] 安裝 Traefik"
-      helm install traefik traefik/traefik \
+      helm install traefik traefik/traefik --version=23.0.0 \
         --namespace kube-system \
         --set service.spec.type=NodePort \
+        --set service.spec.externalIPs={#{MASTER_IP}} \
         --set service.spec.ports[0].nodePort=32080 \
-        --set additionalArguments="{--entryPoints.web.address=:32080}"
+        --set service.spec.ports[1].nodePort=32443 \
+        --set "additionalArguments[0]=--entryPoints.web.address=:32080" \
+        --set "additionalArguments[1]=--entryPoints.websecure.address=:32443"
 
       # 確保 Traefik 成功部署
       echo "[INFO] 等待 Traefik 部署..."
@@ -86,18 +88,33 @@ Vagrant.configure("2") do |config|
         sleep 10
       done
 
+      # 確保 Traefik CRDs 安裝完成
+      echo "[INFO] 確保 Traefik CRDs 可用..."
+      until kubectl get crds | grep -E 'ingressroutes.traefik.(containo.us|io)'; do
+        echo "[INFO] 等待 Traefik CRDs..."
+        sleep 5
+      done
+
       # 安裝 Rancher
       echo "[INFO] 安裝 Rancher"
       kubectl create namespace cattle-system || true
       helm install rancher rancher-stable/rancher \
         --namespace cattle-system \
-        --set hostname=#{RANCHER_HOSTNAME} \
+        --set hostname="#{RANCHER_HOSTNAME}" \
         --set replicas=1 \
         --set bootstrapPassword="admin" \
-        --set tls=external \
+        --set tls="none" \
         --set ingress.enabled=false
 
+      # 確保 Rancher 部署完成
+      echo "[INFO] 等待 Rancher 部署..."
+      until kubectl get pods -n cattle-system | grep rancher | grep 'Running' > /dev/null; do
+        echo "[INFO] 等待 Rancher Ready..."
+        sleep 10
+      done
+
       # 套用 Traefik 設定
+      echo "[INFO] 套用 Traefik IngressRoute 設定..."
       kubectl apply -f #{TRAEFIK_CONFIG_DIR}/rancher.yaml
 
       echo "[INFO] Rancher 安裝完成，可透過 http://#{MASTER_IP}:8080 訪問"
