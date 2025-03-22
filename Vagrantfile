@@ -16,8 +16,10 @@ Vagrant.configure("2") do |config|
   config.vm.define "k3s-master" do |master|
     master.vm.hostname = "k3s-master"
     master.vm.network "private_network", ip: MASTER_IP
-    master.vm.network "forwarded_port", guest: 6443, host: 6443  # K3s API Server
-    master.vm.network "forwarded_port", guest: 32080, host: 8080 # Traefik HTTP 入口
+
+    # 為了避免主機端口衝突，將 VM 的 80/443 對應到主機的 8080/8443
+    master.vm.network "forwarded_port", guest: 80, host: 8080    # Traefik HTTP
+    master.vm.network "forwarded_port", guest: 443, host: 8443   # Traefik HTTPS
 
     master.vm.provider "virtualbox" do |vb|
       vb.memory = 8192
@@ -70,16 +72,17 @@ Vagrant.configure("2") do |config|
       helm repo add jetstack https://charts.jetstack.io
       helm repo update
 
-      # 安裝 Traefik 並固定 Helm Chart 版本
+      # 安裝 Traefik 並固定 Helm Chart 版本（使用 LoadBalancer 模式）
       echo "[INFO] 安裝 Traefik"
       helm install traefik traefik/traefik --version=23.0.0 \
         --namespace kube-system \
-        --set service.spec.type=NodePort \
-        --set service.spec.externalIPs={#{MASTER_IP}} \
-        --set service.spec.ports[0].nodePort=32080 \
-        --set service.spec.ports[1].nodePort=32443 \
-        --set "additionalArguments[0]=--entryPoints.web.address=:32080" \
-        --set "additionalArguments[1]=--entryPoints.websecure.address=:32443"
+        --set service.type=LoadBalancer \
+        --set ports.web.port=80 \
+        --set ports.websecure.port=443 \
+        --set ports.web.expose=true \
+        --set ports.websecure.expose=true \
+        --set ports.web.exposedPort=80 \
+        --set ports.websecure.exposedPort=443
 
       # 確保 Traefik 成功部署
       echo "[INFO] 等待 Traefik 部署..."
@@ -117,7 +120,7 @@ Vagrant.configure("2") do |config|
       echo "[INFO] 套用 Traefik IngressRoute 設定..."
       kubectl apply -f #{TRAEFIK_CONFIG_DIR}/rancher.yaml
 
-      echo "[INFO] Rancher 安裝完成，可透過 http://#{MASTER_IP}:8080 訪問"
+      echo "[INFO] Rancher 安裝完成，可透過 http://localhost:8080 或 https://localhost:8443 訪問"
     SHELL
   end
 
@@ -179,4 +182,3 @@ Vagrant.configure("2") do |config|
     SHELL
   end
 end
-
