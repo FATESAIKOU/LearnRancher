@@ -1,4 +1,4 @@
-# Vagrantfile with K3s + Traefik + Rancher + TLS + Dashboard fully automated
+# Vagrantfile with K3s + Traefik + Rancher + TLS + Dashboard using PathPrefix routing only
 Vagrant.configure("2") do |config|
   config.vm.box = "ubuntu/focal64"
 
@@ -8,8 +8,6 @@ Vagrant.configure("2") do |config|
   MASTER_IP = "192.168.56.10"
   WORKER1_IP = "192.168.56.11"
   WORKER2_IP = "192.168.56.12"
-  RANCHER_HOSTNAME = "rancher.local"
-  DASHBOARD_HOSTNAME = "dashboard.localhost"
   TRAEFIK_CONFIG_DIR = "/vagrant/traefik-config"
 
   # 將本機 traefik-config 目錄同步到 VM
@@ -33,7 +31,7 @@ Vagrant.configure("2") do |config|
 
     # Master 安裝程序
     master.vm.provision "shell", inline: <<-SHELL
-      echo "[INFO] 安裝 K3s Master 並啟用 Helm、Traefik、Rancher、Dashboard 與 TLS"
+      echo "[INFO] 安裝 K3s Master 並啟用 Helm、Traefik、Rancher、Dashboard 與 TLS (PathPrefix 模式)"
 
       # 安裝 K3s 並指定 node IP
       curl -sfL https://get.k3s.io | sh -s - --write-kubeconfig-mode=644 --node-ip=#{MASTER_IP}
@@ -44,9 +42,6 @@ Vagrant.configure("2") do |config|
       sudo ln -s /usr/local/bin/kubectl /usr/bin/kubectl
       sudo chown vagrant:vagrant /etc/rancher/k3s/k3s.yaml
       export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-
-      # 設定 hosts
-      echo "#{MASTER_IP} #{RANCHER_HOSTNAME} #{DASHBOARD_HOSTNAME}" | sudo tee -a /etc/hosts
 
       # 等待節點 Ready
       until kubectl get nodes 2>/dev/null | grep -q 'Ready'; do
@@ -77,7 +72,7 @@ Vagrant.configure("2") do |config|
       openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
         -keyout #{TRAEFIK_CONFIG_DIR}/tls/tls.key \
         -out #{TRAEFIK_CONFIG_DIR}/tls/tls.crt \
-        -subj "/CN=#{DASHBOARD_HOSTNAME}"
+        -subj "/CN=localhost"
 
       # 建立 TLS secret
       echo "[INFO] 建立 tls secret"
@@ -101,7 +96,6 @@ Vagrant.configure("2") do |config|
         --set ports.websecure.exposedPort=443 \
         --set additionalArguments[0]=--api.dashboard=true \
         --set additionalArguments[1]=--entrypoints.websecure.http.tls=true \
-        --set additionalArguments[2]=--entrypoints.websecure.http.tls.certResolver=default \
         --set "volumes[0].name=certs" \
         --set "volumes[0].mountPath=/certs" \
         --set "volumes[0].type=secret" \
@@ -113,16 +107,16 @@ Vagrant.configure("2") do |config|
         sleep 10
       done
 
-      # 套用 Traefik Dashboard 的 IngressRoute 設定
-      echo "[INFO] 套用 Dashboard IngressRoute"
+      # 套用 Dashboard IngressRoute (PathPrefix)
+      echo "[INFO] 套用 Dashboard IngressRoute (PathPrefix)"
       kubectl apply -f #{TRAEFIK_CONFIG_DIR}/dashboard.yaml
 
-      # 安裝 Rancher
+      # 安裝 Rancher（啟用 path base）
       echo "[INFO] 安裝 Rancher"
       kubectl create namespace cattle-system || true
       helm install rancher rancher-stable/rancher \
         --namespace cattle-system \
-        --set hostname="#{RANCHER_HOSTNAME}" \
+        --set hostname="localhost" \
         --set replicas=1 \
         --set bootstrapPassword="admin" \
         --set tls="none" \
@@ -134,13 +128,13 @@ Vagrant.configure("2") do |config|
         sleep 10
       done
 
-      # 套用 Rancher 的 IngressRoute
-      echo "[INFO] 套用 Rancher IngressRoute"
+      # 套用 Rancher 的 IngressRoute (PathPrefix)
+      echo "[INFO] 套用 Rancher IngressRoute (PathPrefix)"
       kubectl apply -f #{TRAEFIK_CONFIG_DIR}/rancher.yaml
 
       echo "[INFO] 所有服務已部署完成！"
-      echo "[INFO] Rancher： https://localhost:8443"
-      echo "[INFO] Dashboard： https://dashboard.localhost:8443"
+      echo "[INFO] Rancher： https://localhost:8443/rancher"
+      echo "[INFO] Dashboard： https://localhost:8443/dashboard"
     SHELL
   end
 

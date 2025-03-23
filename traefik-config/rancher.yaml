@@ -7,7 +7,7 @@ spec:
   entryPoints:
     - websecure
   routes:
-    - match: Host(`rancher.local`)
+    - match: PathPrefix(`/rancher`)
       kind: Rule
       services:
         - name: rancher
