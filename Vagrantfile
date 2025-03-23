@@ -20,7 +20,8 @@ Vagrant.configure("2") do |config|
     master.vm.hostname = "k3s-master"
     master.vm.network "private_network", ip: MASTER_IP
 
-    # 避免 host 上的 80/443 衝突，改轉發到 8080/8443
+    # Forward Kubernetes API port (6443) 到 host
+    master.vm.network "forwarded_port", guest: 6443, host: 6443
     master.vm.network "forwarded_port", guest: 80, host: 8080
     master.vm.network "forwarded_port", guest: 443, host: 8443
 
