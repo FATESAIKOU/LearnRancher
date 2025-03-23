@@ -1,16 +1,16 @@
 apiVersion: traefik.containo.us/v1alpha1
 kind: IngressRoute
 metadata:
-  name: rancher-ingress
-  namespace: cattle-system
+  name: traefik-dashboard
+  namespace: kube-system
 spec:
   entryPoints:
     - websecure
   routes:
-    - match: Host(`rancher.local`)
+    - match: Host(`dashboard.localhost`)
       kind: Rule
       services:
-        - name: rancher
-          port: 80
+        - name: api@internal
+          kind: TraefikService
   tls:
     secretName: traefik-cert
