@@ -108,10 +108,6 @@ Vagrant.configure("2") do |config|
         sleep 10
       done
 
-      # 套用 Dashboard IngressRoute (PathPrefix)
-      echo "[INFO] 套用 Dashboard IngressRoute (PathPrefix)"
-      kubectl apply -f #{TRAEFIK_CONFIG_DIR}/dashboard.yaml
-
       # 安裝 Rancher（啟用 path base）
       echo "[INFO] 安裝 Rancher"
       kubectl create namespace cattle-system || true
@@ -129,8 +125,8 @@ Vagrant.configure("2") do |config|
         sleep 10
       done
 
-      # 套用 Rancher 的 IngressRoute (PathPrefix)
-      echo "[INFO] 套用 Rancher IngressRoute (PathPrefix)"
+      # 套用 Rancher 的 IngressRoute
+      echo "[INFO] 套用 Rancher IngressRoute"
       kubectl apply -f #{TRAEFIK_CONFIG_DIR}/rancher.yaml
 
       echo "[INFO] 所有服務已部署完成！"
