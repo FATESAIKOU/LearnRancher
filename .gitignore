@@ -2,3 +2,4 @@
 node-token
 *.swp
 *.swo
+traefik-config/tls
